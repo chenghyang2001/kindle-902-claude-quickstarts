@@ -9,7 +9,7 @@
 
 和第 5 章不同，這裡沒有 DOM 可以問。模型只看得到截圖，所有指向都是像素座標；工具用 `xdotool` 把座標變成真的滑鼠與鍵盤事件，再截一張圖回給模型。所以這一章的重點有三個：截圖與座標怎麼縮放、同一套工具的五個日期版本怎麼選、以及三家供應商（Claude API、Bedrock、Vertex）在迴圈裡的差別。
 
-README 一開頭就強調這是刻意精簡的示範，而且代理迴圈就跑在被操作的那個容器裡，一次只能服務一個工作階段，換工作階段時必要的話得重啟或重設。想看更完整的做法（圖片大小控制、伺服器端壓縮、批次工具呼叫、軌跡錄製），README 指向同一個 repo 的 `computer-use-best-practices` 專案。
+README 前段的提示框強調這是刻意精簡的示範，而且代理迴圈就跑在被操作的那個容器裡，一次只能服務一個工作階段，換工作階段時必要的話得重啟或重設。想看更完整的做法（圖片大小控制、伺服器端壓縮、批次工具呼叫、軌跡錄製），README 指向同一個 repo 的 `computer-use-best-practices` 專案。
 
 系統提示也透露了實務經驗：開 GUI 程式要在 bash 裡指定 `DISPLAY=:1` 並放進子殼層；輸出很長的指令先導到暫存檔再查；讀 PDF 不要一頁頁截圖，改用 `curl` 下載後轉成文字檔。
 
@@ -119,7 +119,9 @@ if toolset_name is not None and member_call_failed:
 else:
     result = await tool_collection.run(
         name=tool_use_block["name"],
-        tool_input=cast(dict[str, Any], tool_use_block.get("input", {})),
+        tool_input=cast(
+            dict[str, Any], tool_use_block.get("input", {})
+        ),
         toolset_name=toolset_name,
     )
     if toolset_name is not None and result.error:

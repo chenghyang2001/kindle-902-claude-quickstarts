@@ -71,14 +71,23 @@ const responseSchema = z.object({
   response: z.string(),
   thinking: z.string(),
   user_mood: z.enum([
-    "positive", "neutral", "negative",
-    "curious", "frustrated", "confused",
+    "positive",
+    "neutral",
+    "negative",
+    "curious",
+    "frustrated",
+    "confused",
   ]),
   suggested_questions: z.array(z.string()),
-  debug: z.object({ context_used: z.boolean() }),
+  debug: z.object({
+    context_used: z.boolean(),
+  }),
   matched_categories: z.array(z.string()).optional(),
   redirect_to_agent: z
-    .object({ should_redirect: z.boolean(), reason: z.string().optional() })
+    .object({
+      should_redirect: z.boolean(),
+      reason: z.string().optional(),
+    })
     .optional(),
 });
 ```
@@ -128,7 +137,7 @@ const input: RetrieveCommandInput = {
 ${isRagWorking ? `${retrievedContext}` : "No information found for this query."}
 ```
 
-`retrieveContext()` 沒拿到 `knowledgeBaseId` 或呼叫出錯時回傳 `isRagWorking: false`，不丟例外。系統提示接著要求模型「只用給你的資訊回答，沒有資訊或不相關就轉給真人」。所以知識庫壞掉時，預期行為是每一題都轉真人，而不是模型自己憑記憶回答。
+`retrieveContext()` 沒拿到 `knowledgeBaseId` 或呼叫出錯時回傳 `isRagWorking: false`，不丟例外。系統提示接著要求模型只用給你的資訊回答，並說沒有資訊或資訊不相關時「可以」轉給真人（原文是 `you can redirect the user to a human agent`，不是強制）。所以知識庫壞掉時，提示引導的方向是轉真人，而不是模型自己憑記憶回答；實際會不會每題都轉，原始碼看不出來。
 
 ## 五、用到的 Claude 功能
 
@@ -158,13 +167,13 @@ README 另有一節教用 AWS Amplify 部署，並說明 AWS 變數前面多一�
 3. **提示範例的分類代號和分類表對不上**：系統提示的兩個範例用了 `account_management`、`technical_support`，但 `customer_support_categories.json` 的 `id` 是 `account`、`billing`、`feature`、`internal`、`legal`、`other`、`technical`、`usage`。程式沒有檢查模型回的代號是否在表內。
 4. **分類表的 `keywords` 沒有送給模型**：`route.ts` 只把各分類的 `id` 用逗號接起來放進提示，`name` 與 `keywords` 在這支路由沒有用到。
 5. **錯誤回覆少欄位**：例外時回傳的物件沒有 `suggested_questions`，狀態碼是 500；前端看到非 2xx 直接丟錯，只寫 console，畫面上的佔位訊息不會被換掉。
-6. **讀了後端沒送的標頭**：`ChatArea.tsx` 會讀 `x-suggested-questions` 標頭，但 `route.ts` 只設定 `x-rag-sources` 與 `X-Debug-Data`。另外 README 的 Amplify 設定寫了 `KNOWLEDGE_BASE_ID`，程式裡知識庫 ID 其實來自請求本文；這個變數在哪裡被讀取，看不出來。
+6. **讀了後端沒送的標頭**：`ChatArea.tsx` 會讀 `x-suggested-questions` 標頭，但 `route.ts` 只設定 `x-rag-sources` 與 `X-Debug-Data`。另外 README 的 Amplify 設定與 `amplify.yml` 都寫了 `KNOWLEDGE_BASE_ID`，程式裡知識庫 ID 其實來自請求本文；搜尋整個專案，這個變數只出現在這兩處，沒有任何程式讀取它。
 
 ## 八、重點回顧
 
 - 流程是「先檢索、再生成」：一次 Bedrock 檢索加一次 Claude 呼叫，沒有工具迴圈。
 - 一個 JSON 回覆同時帶回答、情緒、分類、建議追問、是否轉真人，前端各區塊各取所需。
 - 強制 JSON 的手法是系統提示寫格式與範例，加上預填 assistant 的 `"{"`，再由 zod 驗證。
-- 檢索失敗不會讓請求失敗，而是讓模型依提示轉給真人。
+- 檢索失敗不會讓請求失敗，而是由提示引導模型轉給真人（提示用的是「可以」，不是強制）。
 - 模型看到最多 3 段內容，畫面只顯示 1 個來源，這是 `.slice(0, 1)` 造成的。
 - 提示範例與分類表不一致這類小落差，要靠程式端驗證才抓得到。

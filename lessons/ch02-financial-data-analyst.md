@@ -101,7 +101,7 @@ const response = await client.messages.create({
 
 `tool_choice` 是 `auto`，要不要畫圖由模型決定，所以純聊天的問題可以只回文字。系統提示很長：先列六種圖各自適合的情境，再給時間序列、多組比較、圓餅三組資料結構範例，最後列「一定要」與「絕對不要」，其中一條是不要對使用者說自己在用這個工具。
 
-**片段 3：看拿到工具呼叫後做什麼（`route.ts`）**
+**片段 3：看拿到工具呼叫後做什麼（`route.ts`，略去原始碼註解）**
 
 ```ts
 if (chartData.chartType === "pie") {
@@ -120,7 +120,7 @@ if (chartData.chartType === "pie") {
 
 圓餅圖元件固定用 `dataKey="value"`、`nameKey="segment"`，所以後端把模型給的資料統一改成這兩個鍵。這是「模型輸出不一定照你的欄位名，程式端補一層轉換」的實例。之後所有圖都會跑一段 `reduce`，替 `chartConfig` 的每個鍵依序加上 `color: hsl(var(--chart-1))`、`--chart-2`……。
 
-**片段 4：看文字檔怎麼進到模型（`page.tsx`）**
+**片段 4：看文字檔怎麼進到模型（`page.tsx`，略去原始碼註解）**
 
 ```ts
 if (msg.file.isText) {

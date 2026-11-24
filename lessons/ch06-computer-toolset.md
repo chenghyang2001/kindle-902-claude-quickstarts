@@ -9,7 +9,7 @@ README 的定位是：Claude 電腦操作工具組（`computer_toolset_20260801`
 
 驅動程式 `VncComputer` 不用任何 VNC 函式庫，直接用 socket 與 `struct` 講 RFB 協定（VNC 的底層協定），控制一個桌面，實作工具組裡的十個工具：`screenshot`、`left_click`、`right_click`、`double_click`、`triple_click`、`mouse_move`、`scroll`、`type`、`key`、`wait`。其餘工具（`zoom`、`left_click_drag`、`left_mouse_down`、`left_mouse_up`、`middle_click`、`hold_key`、`cursor_position`）沒有實作，由 SDK 回報為停用並拒絕。
 
-和第 4 章最大的差別有兩個：模型靠「截圖」看環境，而不是文字清單；`run.py` 在每個會改變桌面的動作前，都先問終端機前的人要不要放行。
+和第 4 章最大的差別有兩個：模型靠「截圖」看環境，而不是文字清單；`run.py` 在截圖以外的每個動作前（包含 `wait`、`mouse_move`），都先問終端機前的人要不要放行。
 
 ## 二、架構與資料流
 
@@ -51,7 +51,7 @@ README 的定位是：Claude 電腦操作工具組（`computer_toolset_20260801`
 | --- | --- | --- |
 | `python/vnc_computer.py` | 217 | 範例驅動程式：RFB 握手、鍵碼表 `KEYSYMS`、滑鼠與鍵盤事件、截圖轉 PNG、十個工具方法 |
 | `python/run.py` | 68 | 入口：建立驅動程式與確認函式 `ask`，交給 tool runner，逐則印出模型訊息 |
-| `python/exercise.py` | 127 | 不用模型、不用金鑰的冒煙檢查：對 VNC 伺服器送八種呼叫並用 `assert` 檢查 |
+| `python/exercise.py` | 127 | 不用模型、不用金鑰的冒煙檢查：對 VNC 伺服器送八個呼叫（六個應成功、兩個應被拒絕）並用 `assert` 檢查 |
 | `python/requirements.txt` | 4 | `anthropic>=2.0.0,<3`、`pillow>=10`、`typing_extensions>=4.14` |
 | `typescript/vnc-computer.ts`、`run.ts`、`exercise.ts` | 325／71／122 | 同一套做法的 TypeScript 版（類別同名 `VncComputer`，迴圈用 `client.beta.messages.toolRunner`） |
 | `README.md` | 96 | 安裝、VNC 伺服器指令、執行、實作了什麼與沒做什麼 |
