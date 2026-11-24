@@ -1,0 +1,26 @@
+# Python／執行期
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.claude/
+practice/**/.claude/
+
+# 機密（本教材不使用任何金鑰，仍一律排除）
+.env
+credentials.json
+token.json
+
+# 當機殘留與暫存
+*.stackdump
+core
+*.core
+*.dmp
+*~
+*.swp
+.DS_Store
+Thumbs.db
+
+# 互動演練腳本執行時產生的輸出（每台電腦各自一份，不進版控）
+practice/ch[0-9]*/interactive/
