@@ -1,0 +1,2 @@
+# 腳本一律 LF：Windows 的 autocrlf 會把 .sh 轉成 CRLF，bash 會跑不起來
+*.sh text eol=lf
