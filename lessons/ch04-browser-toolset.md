@@ -39,7 +39,7 @@ README 第一句就講明：這是 Claude 瀏覽器工具組（`browser_toolset_
                        ▼
 ┌──────────────────────────────────────────────────────┐
 │ Chromium（自己啟動，--remote-debugging-port=0，       │
-│ 暫存 profile，一個分頁）                              │
+│ 暫存 profile，只操作一個分頁）                        │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -75,8 +75,8 @@ while time.monotonic() < deadline:
 **片段 2：看一個 CDP 指令怎麼送出去、怎麼等回應**（`_send`）
 
 ```python
-command = {"id": message_id, "method": method, "params": params or {}}
-if self._session_id and not method.startswith(("Target.", "Browser.")):
+command: dict[str, Any] = {"id": message_id, "method": method, "params": params or {}}
+if self._session_id and not method.startswith(("Target.", "Browser.")):  # these go to the browser itself
     command["sessionId"] = self._session_id
 self._socket.send(json.dumps(command))
 deadline = time.monotonic() + COMMAND_TIMEOUT_S

@@ -7,7 +7,7 @@
 
 這是一個「讓 Claude 操作瀏覽器」的最小參考實作。整個東西包在一個 Docker 容器裡：Streamlit 聊天介面收使用者的話，代理迴圈呼叫 Claude，Claude 透過一個名叫 `browser` 的自訂工具下指令，工具再用 Playwright 驅動容器內的 Chromium；畫面由 Xvfb 虛擬顯示器輸出，使用者可以從 noVNC 看到瀏覽器實際在做什麼。
 
-它和第 7 章 computer-use-demo 最大的差別在「怎麼指到畫面上的東西」。桌面操作只能看截圖、回報像素座標；這個專案多了一條路：先用 `read_page` 把頁面轉成一棵帶編號的元素樹（`ref_1`、`ref_2`……），之後點擊、填表、捲動都可以直接給 `ref`。README 把好處講得很直接：元素參照不受視窗大小與版面影響，像素座標一換解析度就失準。
+它和第 7 章 computer-use-demo 最大的差別在「怎麼指到畫面上的東西」。桌面操作只能看截圖、回報像素座標；這個專案多了一條路：先用 `read_page` 把頁面轉成一棵帶編號的元素樹（`ref_1`、`ref_2`……），之後點擊、填表、捲動都可以直接給 `ref`。README 把好處講得很直接：元素參照在不同螢幕大小與版面下都能用，像素座標則是視窗一改大小就失準。
 
 另一個重點是工具的宣告方式。這裡沒有用 Anthropic 定義好的工具型別，而是自己寫 `name`、`description`、`input_schema` 三個欄位的一般自訂工具，一個工具用 `action` 參數分出 23 種動作。README 說這份 schema 可以直接拿去當自己專案的起點。
 
@@ -62,7 +62,7 @@
 | `browser_use_demo/browser_tool_utils/browser_dom_script.js` | 450 | 產生無障礙樹與 `ref_N`，存進 `window.__claudeElementMap` |
 | `browser_use_demo/browser_tool_utils/browser_element_script.js` | 90 | 用 `ref` 找回元素、捲到畫面中央、回傳中心座標 |
 | `browser_use_demo/streamlit.py` | 740 | 聊天介面、模型清單、對話紀錄下載、事件迴圈重用 |
-| `browser_use_demo/display_constants.py` | 15 | 寫死的 1920x1080 與 `DISPLAY_NUM = 1` |
+| `browser_use_demo/display_constants.py` | 13 | 寫死的 1920x1080 與 `DISPLAY_NUM = 1` |
 | `Dockerfile`、`docker-compose.yml`、`image/` | — | Ubuntu 22.04、Python 3.11.6、Playwright Chromium、Xvfb／noVNC 啟動腳本 |
 | `tests/test_sampling_loop.py` | 540 | 用 mock 驗證「文字與工具呼叫要一起保留」等行為 |
 
@@ -75,12 +75,13 @@ if (!ref) {
   ref = "ref_" + ++window.__claudeRefCounter;
   window.__claudeElementMap[ref] = new WeakRef(element);
 }
+// ...
 var yaml = indent + "- " + role;
 // ...
 yaml += " [ref=" + ref + "]";
 ```
 
-每個被收進樹裡的元素拿到一個流水號，對照表掛在頁面的 `window` 上，值是 `WeakRef`。輸出是一行一個元素的縮排文字，例如 `- textbox "Search" [ref=ref_3]`。因為對照表活在頁面裡，元素被移除後再用舊 ref，`browser_element_script.js` 會回 `No element found with reference`。
+每個被收進樹裡的元素拿到一個流水號（對照表裡已經有的元素沿用原本的 ref），對照表掛在頁面的 `window` 上，值是 `WeakRef`。輸出是一行一個元素的縮排文字，例如 `- textbox "Search" [ref=ref_3]`。因為對照表活在頁面裡，元素被移除後再用舊 ref，`browser_element_script.js` 會回 `No element found with reference`。
 
 **片段 2：看 ref 點擊其實還是變成座標**（`browser.py` 的 `_click`）
 
@@ -88,11 +89,21 @@ yaml += " [ref=" + ref + "]";
 element_info = await self._execute_js_from_file(
     "browser_element_script.js", ref
 )
+
 if not element_info.get("success", False):
-    raise ToolError(element_info.get("message", "Failed to find element"))
+    raise ToolError(
+        element_info.get("message", "Failed to find element")
+    )
+
+# Get the coordinates from element_info
 click_x, click_y = element_info["coordinates"]
+
+# Move to element and click
 await self._page.mouse.move(click_x, click_y)
-await self._page.mouse.click(click_x, click_y, button=button, click_count=click_count)
+await asyncio.sleep(0.1)
+await self._page.mouse.click(
+    click_x, click_y, button=button, click_count=click_count
+)
 ```
 
 ref 並不是呼叫 DOM 的 `click()`，而是「當下」向頁面問這個元素的中心點，再用真的滑鼠事件點下去。差別在座標是程式即時量的，不是模型從截圖估的，所以不必經過座標換算。
@@ -101,16 +112,25 @@ ref 並不是呼叫 DOM 的 `click()`，而是「當下」向頁面問這個元�
 
 ```python
 builder.add_assistant_message(messages, processed.assistant_content)
+
+# Execute tools and collect results if there are any tool uses
 if processed.tool_uses:
     tool_results = await processor.execute_tools(
-        processed.tool_uses, tool_collection, tool_output_callback
+        processed.tool_uses,
+        tool_collection,
+        tool_output_callback
     )
+
+    # Add all tool results as a single user message
     builder.add_tool_results(messages, tool_results)
+
+    # Continue the loop to process any follow-up
 else:
+    # No tools used, conversation can end here
     return messages
 ```
 
-結束條件只有一個：這次回應裡沒有 `tool_use`。助理訊息是把文字與工具呼叫原樣一起存回去，測試檔 `test_sampling_loop_preserves_text_with_tools` 專門驗這件事。迴圈本身沒有步數上限。
+結束條件只有一個：這次回應裡沒有 `tool_use`。助理訊息是把文字與工具呼叫原樣一起存回去，`tests/test_sampling_loop.py` 裡的測試 `test_sampling_loop_preserves_text_with_tools` 專門驗這件事。迴圈本身沒有步數上限。
 
 **片段 4：看給介面的摘要怎麼被剝掉**（`message_handler.py`）
 
@@ -142,7 +162,7 @@ cp .env.example .env        # 再編輯 .env
 docker-compose up --build   # 開發時可加 --watch
 ```
 
-原始做法需要 `ANTHROPIC_API_KEY`（本教材演練不設定，改走 `claude -p`）。容器的 `entrypoint.sh` 會先跑 `validate_env.py` 檢查金鑰，再啟動 Xvfb、tint2、mutter、x11vnc、noVNC 與 Streamlit。README 列的入口是 `http://localhost:8080`（README 稱為 Streamlit 主介面；`entrypoint.sh` 裡 Streamlit 本身開在 8501，8080 是另一支 `http_server.py`）、`http://localhost:6080`（noVNC）與 `localhost:5900`（VNC）。
+原始做法需要 `ANTHROPIC_API_KEY`（本教材演練不設定，改走 `claude -p`）。容器的 `entrypoint.sh` 會先跑 `validate_env.py` 檢查金鑰，再啟動 Xvfb、tint2、mutter、x11vnc、noVNC 與 Streamlit。README 列的入口是 `http://localhost:8080`（README 稱為 Streamlit 主介面；`entrypoint.sh` 裡 Streamlit 本身開在 8501，8080 是另一支 `http_server.py`，它送出的靜態頁用 iframe 嵌入 8501 與 6080）、`http://localhost:6080`（noVNC）與 `localhost:5900`（VNC）。
 
 ## 七、常見陷阱
 
@@ -150,14 +170,14 @@ docker-compose up --build   # 開發時可加 --watch
 2. **「每輪開頭會收到截圖」在程式裡看不出來。** `BROWSER_SYSTEM_PROMPT` 這樣寫，但 `run_agent` 只把使用者的文字加進 messages，沒有看到自動附截圖的程式。
 3. **點擊時座標優先於 ref，hover 則相反。** `_click` 先判斷 `coordinate` 再判斷 `ref`；`_hover` 先判斷 `ref`。兩個都給的話，行為不一樣。
 4. **座標換算是經驗值。** `CoordinateScaler` 假設模型看到的是 1456x819，把座標乘上約 1.3187；超過 1456、819 各自的 1.2 倍就當成「已經是實際座標」不換算。`browser.py` 的註解自己說建議做法是用戶端先縮圖。
-5. **`find` 會默默退回。** 它另外用環境變數的金鑰呼叫模型，任何例外都被 `except Exception: pass` 吃掉，退回只回報筆數、不給 ref 的文字比對。`CHANGELOG.md` 記錄了兩次因此而起的修正。
+5. **`find` 會默默退回。** 它另外用環境變數的金鑰呼叫模型，任何例外都被 `except Exception: pass` 吃掉，退回只回報筆數、不給 ref 的文字比對。`CHANGELOG.md` 在同一天（9/29/26）記錄了兩項因此而起的修正。
 6. **Google 搜尋會遇到 CAPTCHA。** README 建議在提示詞裡直接指定網站，不要先上搜尋引擎。
 
 ## 八、重點回顧
 
 - 這個專案用一個自訂工具加 `action` 參數包住 23 種瀏覽器動作，schema 完全自己掌控。
 - `read_page` 把頁面轉成帶 `ref_N` 的文字樹，後續操作用 ref，比截圖估座標穩定。
-- ref 點擊的本質是「即時向頁面問座標再用滑鼠點」，ref 失效時工具回錯誤、由模型重新 `read_page`。
-- 讀內容用 `get_page_text`，截圖只拿來確認畫面；系統提示把這個順序寫得很明白。
+- ref 點擊的本質是「即時向頁面問座標再用滑鼠點」，ref 失效時工具回錯誤；系統提示要模型在 ref 行不通時退回「截圖＋座標」。
+- 讀內容用 `get_page_text`，截圖只拿來確認畫面；系統提示與 `BrowserTool` 的 docstring 都這樣寫。
 - 迴圈的結束條件是「回應裡沒有工具呼叫」，沒有步數上限，也沒有實際生效的截圖裁剪。
 - README 的安全提醒：隔離環境、不給帳密、網域白名單、有後果的動作要人確認，並留意網頁內容的提示詞注入。

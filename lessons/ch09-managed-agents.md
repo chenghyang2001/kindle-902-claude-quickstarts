@@ -21,8 +21,8 @@
 | `linear` | Linear 上被 @ 或指派時回留言 | 單代理（`claude-opus-5`） | webhook | session `metadata` |
 | `mcp-server-typescript` | 把 Sessions API 包成 9 個 MCP 工具 | 非代理（自己不建代理） | MCP 用戶端呼叫 | 無 |
 | `roadtrip-planner` | 國家公園公路旅行規劃 | 多代理（coordinator `claude-sonnet-5`＋reviewer `claude-opus-5`） | 瀏覽器聊天 | session（README 寫沒有資料庫） |
-| `self-hosted-sandboxes` | 在自己的硬體上跑 session 的沙箱（多個供應商版本） | 示範用單代理；`openshell-policy` 另有 `hello` 與 `reviewer` 兩份定義，兩者關係未細讀 | 工作佇列輪詢或 webhook | `docker-memory` 會掛載並回寫 memory store |
-| `sentry` | 排程的 Sentry 問題分流報告 | 單代理（`claude-opus-5`） | cron 排程 | 看不出來（只讀了 README 摘要與排程設定） |
+| `self-hosted-sandboxes` | 在自己的硬體上跑 session 的沙箱（多個供應商版本） | 示範用單代理；`openshell-policy` 另有 `hello`（示範代理）與 `reviewer`（只有自訂工具 `decide`，審核沙箱代理提出的網路規則申請）兩份定義 | 工作佇列輪詢或 webhook | `docker-memory` 會掛載並回寫 memory store |
+| `sentry` | 排程的 Sentry 問題分流報告 | 單代理（`claude-opus-5`） | cron 排程 | 沒有 memory store；每次讀最近 24 小時，報告寫到 session 的 `/mnt/session/outputs/TRIAGE_REPORT.md` |
 | `sentry-autofix` | Sentry 新錯誤→寫失敗測試→修→推分支，由主機開 PR | 單代理（`claude-opus-5`），每個 issue 一個 session | 簽章 webhook 或 `npm run fix` | session `metadata` 與事件紀錄 |
 | `slack` | Slack 上被 @ 時回討論串 | 單代理（`claude-opus-5`） | webhook | session `metadata` |
 
@@ -52,13 +52,13 @@
                                    └────────────── ⑦ chat.postMessage
 ```
 
-`sentry-autofix` 則多一個主機程式：Sentry webhook → `src/app.ts` 驗簽 → `src/fixer.ts` 建立 session → 代理在沙箱裡重現並修好、推分支 → 呼叫自訂工具 `open_pull_request` → 主機用自己的 GitHub token 開 PR。
+`sentry-autofix` 則多一個主機程式：Sentry webhook → `src/app.ts` 驗簽 → `src/main.ts` 傳入的 `onIssue` 呼叫 `src/fixer.ts` 的 `fixIssue()` 建立 session → 代理在沙箱裡重現並修好、推分支 → 呼叫自訂工具 `open_pull_request` → 主機用自己的 GitHub token 開 PR。
 
 ## 三、關鍵檔案
 
 | 檔案 | 行數大約 | 負責什麼 |
 | --- | --- | --- |
-| `README.md` | 115 | 12 個子專案的總覽 |
+| `README.md` | 130 | 12 個子專案的總覽 |
 | `daily-brief/agents/daily-brief/agent.md` | 60 | 模型與工具（frontmatter）＋ 8 個執行步驟（本文即系統提示） |
 | `daily-brief/agents/daily-brief/deployment.md` | 30 | cron、時區、vault、兩個 memory store 的權限、每次執行預算 |
 | `daily-brief/agents/daily-brief/environment.yaml` | 15 | 沙箱網路白名單 |
@@ -72,7 +72,7 @@
 
 ## 四、關鍵程式片段
 
-看什麼：`daily-brief` 的跨次記憶與花費上限是怎麼宣告的（`deployment.md` 的 frontmatter）。
+看什麼：`daily-brief` 的跨次記憶與花費上限是怎麼宣告的（`deployment.md` 的 frontmatter，節錄；省略了 `instructions`、`currency: USD` 等欄位與部分註解）。
 
 ```yaml
 schedule:
@@ -104,11 +104,11 @@ budget:
 
 書籤取代「最近 24 小時」，晚跑或漏跑都不會掉資料；往前多讀十分鐘造成的重疊由帳本 `ledger.md` 擋掉；讀不到的來源要寫成「讀不到」而不是「沒事」；先確認 Slack 回 `"ok": true` 才記帳。
 
-看什麼：`sentry-autofix` 主機重啟後怎麼接續（`src/fixer.ts` 的 `drive()`）。
+看什麼：`sentry-autofix` 主機重啟後怎麼接續（`src/fixer.ts` 的 `drive()`，節錄，省略註解）。
 
 ```typescript
 const stream = await client.beta.sessions.events.stream(run.sessionId);
-const history = [];
+const history: Anthropic.Beta.Sessions.BetaManagedAgentsSessionEvent[] = [];
 for await (const event of client.beta.sessions.events.list(run.sessionId, { order: "asc" })) history.push(event);
 for (const event of history) {
   if (event.type !== "user.custom_tool_result") continue;
@@ -147,15 +147,20 @@ budget: { type: "limit", max_list_cost: { amount: String(config.maxCents), curre
 # daily-brief
 cp .env.example .env
 agents/setup.sh
+cp preferences.example.md preferences.md
 scripts/seed-preferences.sh preferences.md
 scripts/run.sh
 
-# sentry-autofix
+# sentry-autofix（README 的 By hand 段；另有 ./start.sh 走 Claude Code 引導設定）
+npm install
 ./agents/setup.sh
+$EDITOR .env              # GITHUB_REPO_URL, GITHUB_TOKEN, SENTRY_CLIENT_SECRET
 npm run fix -- SHOP-1A
 npm run dev
 
 # knowledge-wiki
+pip install -r requirements.txt
+export EDGAR_USER_AGENT="your-name your-email"
 python3 fetch_data_room.py --tier=core
 jupyter lab distill_documents_into_knowledge_wiki.ipynb
 ```
@@ -163,11 +168,11 @@ jupyter lab distill_documents_into_knowledge_wiki.ipynb
 ## 七、常見陷阱
 
 1. 預算金額是「以分為單位的字串」：`"500"` 才是 5 美元。`daily-brief/CLAUDE.md` 列了寫錯時的錯誤訊息；到上限是暫停，從頻道看起來只是沒有簡報。
-2. `web_search` 與 `web_fetch` 在 Anthropic 的伺服器上執行，不受 `environment.yaml` 的白名單限制，所以兩個無人值守的代理都把它們關掉，否則被注入的文字就有對外的出口。
+2. `web_search` 與 `web_fetch` 在 Anthropic 的伺服器上執行，不受 `environment.yaml` 的白名單限制，所以 `daily-brief`、`sentry-autofix`、`sentry` 這三個無人值守的代理都把它們關掉，否則被注入的文字就有對外的出口。
 3. MCP 工具組預設是 `always_ask`；無人值守時 session 會永遠停在等核准。`sentry-autofix` README 提醒，代理更新後要回 Console 確認權限沒有跑掉。
 4. `sentry-autofix` 啟動時會檢查基底分支有沒有啟用中的 ruleset，沒有就直接結束；傳統的分支保護規則不算數，因為預設不擋管理員。
 5. Slack 不論成功與否都回 HTTP 200，要看回應本文的 `"ok": true`；`agent.md` 把這條寫進步驟。
-6. `knowledge-wiki` 的代理直接寫共用頁面，README 承認最忙的實體頁約有 5% 的行會互相覆蓋；單一檔案上限 100 KB。另外各子專案要求的 `ant` 版本不一致（`daily-brief` 寫 2.0 以上，`sentry-autofix` 寫 1.34 以上）。
+6. `knowledge-wiki` 的代理直接寫共用頁面，README 承認寫到最忙的實體頁的行約有 5% 會因互相覆蓋而遺失內容；單一檔案上限 100 KB。另外各子專案要求的 `ant` 版本不一致（`daily-brief` 寫 2.0 以上，`sentry-autofix` 寫 1.34 以上）。
 
 ## 八、重點回顧
 

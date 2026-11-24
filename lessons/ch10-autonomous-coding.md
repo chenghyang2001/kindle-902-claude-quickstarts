@@ -100,7 +100,7 @@ is_first_run = not tests_file.exists()
 
 判斷只靠一個檔案存不存在。沒有資料庫、沒有狀態檔、沒有 session 編號。這就是為什麼按 `Ctrl+C` 中斷後，重跑同一個指令就能接續。
 
-**看什麼：「全新 context」是怎麼做到的。**（`agent.py`）
+**看什麼：「全新 context」是怎麼做到的。**（`agent.py`，節錄：省略了印訊息、印 session 標題的幾行與部分註解）
 
 ```python
 while True:
@@ -129,9 +129,9 @@ Features can ONLY be marked as passing (change "passes": false to "passes": true
 Never remove features, never edit descriptions, never modify testing steps.
 ```
 
-`feature_list.json` 的每一筆有四個欄位：`category`（`functional` 或 `style`）、`description`、`steps`、`passes`。規則是只能把 `passes` 由 false 改成 true。這條規則只存在於提示詞裡：`agent.py` 與 `progress.py` 都沒有檢查清單有沒有被刪改，`progress.py` 只負責數數。
+`feature_list.json` 的每一筆有四個欄位：`category`（`functional` 或 `style`）、`description`、`steps`、`passes`。規則是只能動 `passes` 這一個欄位，正常情況只能由 false 改成 true；唯一的反向情況寫在 `coding_prompt.md` 第 3 步：重測發現已通過的功能壞了，要立刻把那一項改回 false。這條規則只存在於提示詞裡：`agent.py` 與 `progress.py` 都沒有檢查清單有沒有被刪改，`progress.py` 只負責數數。
 
-**看什麼：安全 hook 怎麼擋指令。**（`security.py`）
+**看什麼：安全 hook 怎麼擋指令。**（`security.py` 的 `bash_security_hook`，節錄：排版有壓縮，省略了註解與 `pkill`／`chmod`／`init.sh` 的額外檢查）
 
 ```python
 commands = extract_commands(command)
@@ -144,7 +144,7 @@ for cmd in commands:
                 "reason": f"Command '{cmd}' is not in the allowed commands list"}
 ```
 
-這是允許清單，不是禁止清單：沒列在 `ALLOWED_COMMANDS` 的一律擋。解析不了的指令（例如引號沒關）也擋，這叫失敗時偏向安全。清單裡的 `pkill`、`chmod`、`init.sh` 還要再過一層檢查：`pkill` 只能殺 `node`、`npm`、`npx`、`vite`、`next`；`chmod` 只能是 `+x` 類的模式而且不能帶旗標；腳本只能是 `./init.sh`。
+這是允許清單，不是禁止清單：沒列在 `ALLOWED_COMMANDS` 的一律擋。解析不了的指令（例如引號沒關）也擋，這叫失敗時偏向安全。清單裡的 `pkill`、`chmod`、`init.sh` 還要再過一層檢查：`pkill` 只能殺 `node`、`npm`、`npx`、`vite`、`next`；`chmod` 只能是 `+x` 類的模式而且不能帶旗標；腳本只能是 `./init.sh`，或路徑以 `/init.sh` 結尾的腳本（例如 `/path/to/init.sh`；`bash init.sh`、`./setup.sh` 都會被擋）。
 
 ## 五、初始化代理與寫程式代理的分工
 
@@ -196,7 +196,7 @@ python autonomous_agent_demo.py --project-dir ./my_project --max-iterations 3
 1. **沒有「全部通過就停」的判斷。** 外層迴圈的離開條件只有 `--max-iterations`。不加這個參數就一直開新 session，直到手動 `Ctrl+C`。程式印的訊息寫「will run until completion」，但程式碼裡沒有檢查完成的地方。
 2. **清單不可刪改的規則只靠提示詞。** harness 不會比對 `feature_list.json` 前後版本。代理如果刪掉難做的項目，通過率會變好看，程式不會發現。要嚴格就得自己在 harness 加檢查（演練練習 2 會做）。
 3. **第一個 session 看起來像當掉是正常的。** 初始化代理在寫 200 筆測試案例；README 請使用者看有沒有 `[Tool: ...]` 輸出來確認它還在動。
-4. **出錯的處理很簡單。** `run_agent_session` 把任何例外都轉成 `"error"`，外層等 3 秒就用新 session 重試，沒有重試次數上限，也沒有退避。
+4. **出錯的處理很簡單。** `run_agent_session` 把任何例外都轉成 `"error"`，外層等 3 秒（之後還有固定 1 秒的 session 間隔）就用新 session 重試，沒有重試次數上限，也沒有退避。
 5. **允許清單很窄，常用指令會被擋。** `test_security.py` 列出會被擋的包含 `curl`、`wget`、`python app.py`、`touch`、`echo`、`kill`、`rm`。代理要靠 SDK 的 `Write`／`Edit` 工具寫檔，而不是靠 shell。
 6. **判斷第一次與否只看檔案存不存在。** 初始化代理如果寫到一半中斷，留下一份不完整的 `feature_list.json`，下一次啟動會被當成「接續既有專案」，直接交給寫程式代理。這種情況 harness 會不會自己修復，從程式看不出來。
 7. **規格裡有金鑰相關的安排。** 內建的 `app_spec.txt` 寫測試用金鑰放在 `/tmp/api-key`，而且代理「不被允許讀取」這個檔，只能在程式碼裡引用它的路徑。這個限制實際由哪一層設定強制，從這個資料夾的程式看不出來。

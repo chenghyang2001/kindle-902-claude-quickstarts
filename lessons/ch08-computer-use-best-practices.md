@@ -65,7 +65,7 @@ README 第一段是警告：代理能完整控制你的電腦，沒有任何防�
 | `computer_use/tools/computer.py` | 455 | `ComputerTool`：schema、座標換算、`zoom`、按鍵轉換 |
 | `computer_use/tools/batch.py` | 105 | `_BatchTool`：依序執行、遇錯即停 |
 | `computer_use/tools/shell.py` | 135 | 沙箱 `bash`／`python`：30 秒逾時、輸出上限 |
-| `sandbox/default.sb` | 35 | `sandbox-exec` 設定檔：可讀、只能寫 scratch、禁網路 |
+| `sandbox/default.sb` | 35 | `sandbox-exec` 設定檔：可讀、只能寫 scratch（與 `/dev`）、禁網路 |
 | `computer_use/trajectory.py` | 60 | 軌跡錄製與每次執行的 scratch 資料夾 |
 | `computer_use/tools/base.py` | 125 | `Tool` 基底類別與 `ToolCollection` |
 
@@ -75,8 +75,11 @@ README 第一段是警告：代理能完整控制你的電腦，沒有任何防�
 
 ```python
 def n_tokens_for_px(px: int, px_per_token: int = cfg.px_per_token) -> int:
+    """ceil(px / px_per_token) using integer math."""
     return (px - 1) // px_per_token + 1
 
+...
+    # 以下在 target_image_size() 裡（本行為教材註記，中間省略）
     if (
         width <= max_edge_px
         and height <= max_edge_px
@@ -165,7 +168,7 @@ CU_ENABLE_COMPUTER_USE_TOOLS=false python -m computer_use "..."
 3. 明確 schema 不會觸發 computer use 專屬安全分類器（含截圖內容的提示注入偵測），要自己負責防護，或改用託管宣告。
 4. compaction 與 advisor 只有第一方 API 支援；`provider` 不是 `anthropic` 又開著，`Config.__post_init__` 會直接丟 `ValueError`。compaction 也只對 `AUTOCOMPACTION_SUPPORTED_MODELS` 生效，`claude-haiku-4-5` 會被靜默略過。
 5. 文件與程式有兩處不一致：`constants.py` 開頭註解提到 CLI 的 `--config` 與 `--set`，但 `__main__.py` 的 argparse 沒有這兩個參數；README 說訊息本體只放一個快取斷點，`loop.py` 實際最多放 3 個。以程式為準。
-6. 沙箱是「可讀大部分檔案、只能寫 scratch、禁網路」，並另外擋掉 `~/.ssh`、`~/.aws`、`.env` 等路徑；它不是完整隔離，README 仍要求在虛擬機裡跑。
+6. 沙箱是「可讀大部分檔案、只能寫 scratch（與 `/dev`）、禁網路」，並另外擋掉 `~/.ssh`、`~/.aws`、`.env` 等路徑；它不是完整隔離，README 仍要求在虛擬機裡跑。
 
 ## 八、重點回顧
 
