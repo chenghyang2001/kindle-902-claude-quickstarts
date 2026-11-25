@@ -168,7 +168,7 @@ jupyter lab distill_documents_into_knowledge_wiki.ipynb
 ## 七、常見陷阱
 
 1. 預算金額是「以分為單位的字串」：`"500"` 才是 5 美元。`daily-brief/CLAUDE.md` 列了寫錯時的錯誤訊息；到上限是暫停，從頻道看起來只是沒有簡報。
-2. `web_search` 與 `web_fetch` 在 Anthropic 的伺服器上執行，不受 `environment.yaml` 的白名單限制，所以 `daily-brief`、`sentry-autofix`、`sentry` 這三個無人值守的代理都把它們關掉，否則被注入的文字就有對外的出口。
+2. `web_search` 與 `web_fetch` 在 Anthropic 的伺服器上執行，不受 `environment.yaml` 的白名單限制，所以 `daily-brief`、`sentry-autofix`、`sentry` 這三個無人值守的代理都把它們關掉，否則被注入的文字就有對外的出口。（2026-11 官方文件補充：環境設成 `limited` 網路時，`allowed_hosts` 也會限制這兩個工具；設成 `unrestricted` 則不限制。見第九節。）
 3. MCP 工具組預設是 `always_ask`；無人值守時 session 會永遠停在等核准。`sentry-autofix` README 提醒，代理更新後要回 Console 確認權限沒有跑掉。
 4. `sentry-autofix` 啟動時會檢查基底分支有沒有啟用中的 ruleset，沒有就直接結束；傳統的分支保護規則不算數，因為預設不擋管理員。
 5. Slack 不論成功與否都回 HTTP 200，要看回應本文的 `"ok": true`；`agent.md` 把這條寫進步驟。
@@ -182,3 +182,86 @@ jupyter lab distill_documents_into_knowledge_wiki.ipynb
 - `sentry-autofix` 的主機不存狀態，靠重播事件紀錄接續；關鍵決定（哪個 repo、哪個分支、關聯哪個 issue）留在主機，不交給代理。
 - `knowledge-wiki` 用一次 dynamic workflow 讓 lead 代理指揮 extractor、resolver、analyzer、organizer；README 記錄的那次執行花了 23 分鐘、約 16 美元。
 - 無人值守的代理，安全靠外圍：網路白名單、沙箱拿不到的憑證、唯讀 token、花費上限，以及最後由人審的 PR。
+
+## 九、程式碼與資料放哪裡（官方文件查證）
+
+> 查證日期：2026-11-25。來源只用 Anthropic 官方文件（platform.claude.com/docs）。Managed Agents 目前是 beta，行為可能再變。文件沒寫的標「官方文件未說明」。
+
+### 一句話結論
+
+程式碼和資料**不必一開始就放在 Anthropic**：程式碼可以留在 GitHub，每次 session 開始時由 Anthropic 複製進沙盒；資料可以用檔案上傳、MCP 伺服器或你自己的工具在工作時拿進來。但只要用 Anthropic 的雲端沙盒，**工作期間的檔案、對話紀錄、工具結果都會存在 Anthropic，而且一直保留到你刪除 session 為止**。
+
+### 東西放哪裡
+
+| 東西 | 放哪裡 | 官方依據 |
+| --- | --- | --- |
+| 代理迴圈（決定下一步呼叫哪個工具） | Anthropic 的服務端 | [Overview](https://platform.claude.com/docs/en/managed-agents/overview)、[Choosing an environment](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment) |
+| 代理設定（模型、系統提示、工具、MCP、skills） | Anthropic 的 `agent` 物件（`POST /v1/agents`），有版本號，每次改動版本加 1 | [Agent setup](https://platform.claude.com/docs/en/managed-agents/agent-setup) |
+| 沙盒設定（網路規則、要裝的套件） | Anthropic 的 `environment` 物件，**沒有版本**，要自己記改了什麼 | [Environments](https://platform.claude.com/docs/en/managed-agents/environments) |
+| 工具真正執行的地方 | 雲端：Anthropic 為每個 session 開一個獨立 Linux 容器（Ubuntu 24.04、最多 8 GB 記憶體、10 GB 磁碟）；自架：你自己的機器 | [Cloud sandbox reference](https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference)、[Choosing an environment](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment) |
+| 程式碼 | 正本可留在 GitHub，用 `github_repository` 資源在 session 開始時複製進沙盒，代理可以 commit、push | [GitHub](https://platform.claude.com/docs/en/managed-agents/github) |
+| 輸入檔案 | 先用 Files API 上傳，再掛進沙盒 `/mnt/session/uploads/`（唯讀），每個 session 最多 500 個檔 | [Files](https://platform.claude.com/docs/en/managed-agents/files) |
+| 產出檔案 | 代理寫到 `/mnt/session/outputs/`，之後用 Files API 下載 | [Files](https://platform.claude.com/docs/en/managed-agents/files) |
+| 跨 session 的記憶 | memory store，掛在 `/mnt/memory/`，每次修改都留版本 | [Memory](https://platform.claude.com/docs/en/managed-agents/memory) |
+| 對話紀錄與事件 | Anthropic 保存，刪除 session 前一直都在 | [API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention) |
+| 金鑰／token | vault（保險箱）：MCP 用 OAuth 或 bearer token；一般 API 用「環境變數憑證」，沙盒裡只有替代字串，送出請求時才換成真值 | [Vaults](https://platform.claude.com/docs/en/managed-agents/vaults) |
+
+### 怎麼連外部資料
+
+| 方式 | 說明 | 官方依據 |
+| --- | --- | --- |
+| GitHub repo | 官方直接支援的資源類型。私人 repo 要給 token，只要讀就給 `Contents: Read`，要 push 就給讀寫。要開 PR 還得另外接 GitHub MCP | [GitHub](https://platform.claude.com/docs/en/managed-agents/github) |
+| Files API 上傳 | 官方直接支援。適合 CSV、PDF 這類一次給的參考資料 | [Files](https://platform.claude.com/docs/en/managed-agents/files) |
+| MCP 伺服器 | 可以接任何有 HTTP 端點的遠端 MCP 伺服器；公司內部的伺服器可以用 MCP tunnel（研究預覽，要申請） | [Reference](https://platform.claude.com/docs/en/managed-agents/reference)、[MCP connector](https://platform.claude.com/docs/en/managed-agents/mcp-connector) |
+| Google Drive | 官方 Managed Agents 文件**沒有列出** Google Drive 專用的連接方式。要接只能找一個提供 Drive 功能的遠端 MCP 伺服器，或自己寫自訂工具 | 官方文件未說明 |
+| 自訂工具 | 你的程式負責執行工具，再把結果回傳給代理。適合讓代理呼叫你自己的 API，敏感資料不必放進沙盒 | [Tools](https://platform.claude.com/docs/en/managed-agents/tools) |
+| 網路直接抓 | 沙盒裡用 `curl`、`git` 自己下載；能連到哪裡由環境的網路規則決定 | [Environments](https://platform.claude.com/docs/en/managed-agents/environments) |
+
+### 資料流 5 步
+
+1. **建立一次**：建 agent（模型、提示、工具）和 environment（網路、套件），把 ID 記下來。
+2. **開工**：建 session，在 `resources` 裡掛上 GitHub repo、上傳好的檔案、memory store，`vault_ids` 帶入憑證。
+3. **工作中**：代理在沙盒裡讀檔、跑指令、改程式；需要外部資料時透過 MCP、自訂工具或網路去拿。
+4. **交結果**：程式碼用 `git push` 推回 GitHub；其他產出寫到 `/mnt/session/outputs/`，你用 Files API 下載；要留給下次的心得寫進 memory store。
+5. **收尾**：下載完要的東西，再決定要不要刪除 session。刪了以後，紀錄、事件、沙盒、session 自己產出的檔案一起永久刪除；你上傳的檔案、memory store、agent、environment 不受影響，要另外刪。（[Session operations](https://platform.claude.com/docs/en/managed-agents/session-operations)）
+
+### 沙盒保留多久、能不能接續
+
+- **session 會一直保留**：對話紀錄存到你刪除為止；官方說 session 是「有狀態、長時間執行、暫停後能乾淨接續」，檔案系統與對話紀錄跨多次互動都在。（[Overview](https://platform.claude.com/docs/en/managed-agents/overview)、[API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)）
+- **做完是 idle，不是結束**：完成工作的 session 狀態是 `idle`，可以再送訊息繼續；`terminated` 只出現在無法恢復的錯誤或被封存時。（[Session operations](https://platform.claude.com/docs/en/managed-agents/session-operations)）
+- **每個 session 一個新沙盒**：同一個 environment 開的多個 session 不共用檔案；要跨 session 留東西，用 memory store 或推回 GitHub。（[Environments](https://platform.claude.com/docs/en/managed-agents/environments)、[Memory](https://platform.claude.com/docs/en/managed-agents/memory)）
+- **一個 session 最長能跑多久、idle 多久後沙盒會被回收**：官方文件未說明。
+- **被安全系統標記的內容**：Anthropic 可能保留最多 2 年。（[API and data retention](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention)）
+
+### 網路、金鑰與隱私
+
+- 網路有兩種：`unrestricted`（全開，只擋一般的安全黑名單）和 `limited`（預設全擋，要在 `allowed_hosts` 列出網域）。用 API 建的環境**預設是 `unrestricted`**。（[Cloud sandbox reference](https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference)、[Environments](https://platform.claude.com/docs/en/managed-agents/environments)）
+- `web_search`、`web_fetch` 在 Anthropic 那邊執行；環境是 `limited` 時，`allowed_hosts` 也會限制它們。（[Environments](https://platform.claude.com/docs/en/managed-agents/environments)）
+- 金鑰值放進 vault 後是唯寫欄位，API 不會回傳；環境變數憑證在沙盒裡只是替代字串，代理看不到真值。GitHub token 也不會出現在 API 回應裡。（[Vaults](https://platform.claude.com/docs/en/managed-agents/vaults)、[GitHub](https://platform.claude.com/docs/en/managed-agents/github)）
+- 不符合零資料保留（ZDR）與 HIPAA；例外是整套自架的 Managed Agents。（[Overview](https://platform.claude.com/docs/en/managed-agents/overview)）
+- 改用自架沙盒時，檔案和程式執行留在你的機器上，但**對話紀錄和工具回傳的結果仍會送到 Anthropic**。（[Choosing an environment](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment)）
+
+### 計費概要
+
+- 兩部分：token（照一般模型價格）＋ session 執行時間**每小時 0.08 美元**，只算 `running` 狀態的時間，`idle` 等待時不算；不另收容器時數。（[Pricing](https://platform.claude.com/docs/en/about-claude/pricing)）
+- session 裡的網頁搜尋每 1,000 次 10 美元；沒有批次折扣。（[Pricing](https://platform.claude.com/docs/en/about-claude/pricing)）
+- 可以在建立 session 時設花費上限 `budget`（以美分字串表示），到上限就暫停。（[Sessions](https://platform.claude.com/docs/en/managed-agents/sessions)）
+
+### 注意事項
+
+1. 沙盒裡的東西不是永久正本：要留的程式碼一定 push 回 GitHub，要留的檔案一定下載，刪 session 前先確認檔案清單。
+2. 私人 repo 的 token 給最小權限；只要讀就不要給寫。
+3. 敏感資料若不能存在 Anthropic，就不要放進雲端沙盒，改用自訂工具讓代理呼叫你的 API，只回傳需要的結果；但回傳的結果本身仍會進對話紀錄。
+4. 無人值守的代理，環境改成 `limited` 並只列需要的網域；不需要上網就把 `web_search`、`web_fetch` 關掉。
+5. environment 沒有版本，正本建議用檔案寫在 GitHub，用 `ant apply` 同步。
+
+### 先前說法與官方對照
+
+| 先前說法 | 官方查證 | 判定 |
+| --- | --- | --- |
+| 程式碼正本放 GitHub | 官方支援掛 GitHub repo，session 開始時複製進沙盒，可 push 回去 | 正確 |
+| 代理設定透過 API 存在 Anthropic，正本建議留 GitHub | agent 存在 Anthropic 且有版本；官方工具 `ant apply` 就是把設定檔放版本控管再同步 | 正確 |
+| 資料可放 GitHub／Drive／自家 DB，工作時拉進沙盒，做完推回 | GitHub、Files API、MCP、自訂工具都可以；但 **Google Drive 沒有官方專用連接方式**，要靠遠端 MCP 伺服器或自訂工具 | 大致正確，Drive 部分要補充 |
+| 沙盒是暫時的 | session 與它的檔案、紀錄**預設一直保留到你刪除**，做完是 `idle` 可以接續；「暫時」只對「每個 session 各有一個沙盒、彼此不共用」成立 | 需更正 |
+| 私人資料給最小權限 token／連接器 | 官方建議只給任務需要的憑證；GitHub token 分唯讀與讀寫；金鑰放 vault，沙盒看不到真值 | 正確，補充 vault |
+| 敏感資料不進沙盒，改讓代理呼叫自家 API | 自訂工具可以做到，另有自架沙盒選項；但工具回傳的結果與對話紀錄仍會送到 Anthropic，且不符合 ZDR／HIPAA | 正確，但要補「回傳結果仍會上傳」 |
